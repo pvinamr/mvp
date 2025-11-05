@@ -1,4 +1,4 @@
-# model/predict_week.py
+# predict_week.py
 from __future__ import annotations
 
 import math
@@ -9,14 +9,12 @@ import pandas as pd
 from nfl_data_py import import_pbp_data, import_schedules
 
 
-# ================== helpers ==================
+# ---------- helpers ----------
 def bool_series(df: pd.DataFrame, col: str) -> pd.Series:
     return df.get(col, pd.Series(False, index=df.index)).fillna(False).astype(bool)
 
-
 def soft_clip(series: pd.Series, c: float) -> pd.Series:
     return c * np.tanh(series / c)
-
 
 def build_team_ratings(
     pbp_subset: pd.DataFrame,
@@ -152,7 +150,6 @@ def build_team_ratings(
 
     return off_rank, def_rank, mu_off, mu_def
 
-
 def matchup_frame(
     sched_wk: pd.DataFrame, off_rank: pd.DataFrame, def_rank: pd.DataFrame, mu_off: float, mu_def: float
 ) -> pd.DataFrame:
@@ -239,7 +236,7 @@ def matchup_frame(
     return m
 
 
-# ================== public API ==================
+# ---------- public API ----------
 def predict_week(
     season: int,
     week: int,
@@ -250,14 +247,13 @@ def predict_week(
     train_years_back: int = 3,
 ) -> pd.DataFrame:
     """
-    Compute model predictions for (season, week) and return a tidy DataFrame ready for JSON serialization.
-
-    Returns columns:
+    Return a tidy DataFrame of predictions for (season, week).
+    Columns:
       ['game_id','week','away_team','home_team','home_off_epa','away_def_epa_allowed',
        'home_off_vs_away_def','away_off_epa','home_def_epa_allowed','away_off_vs_home_def',
        'net_epa_per_play','K_pair','pred_margin','home_win_prob','pick','pick_prob']
     """
-    # ================== TRAIN: learn weights (EPA & Eckel) ==================
+    # ---- TRAIN: learn weights (EPA & Eckel) ----
     try:
         train_seasons = list(range(season - train_years_back, season))
         pbp_train = import_pbp_data(train_seasons)
@@ -308,7 +304,7 @@ def predict_week(
                     .astype(int)
                 )  # 1 if not neutral
                 X1 = m_wk["K_pair"] * m_wk["net_epa_per_play"]  # EPA term in points
-                # Eckel term in "expected drives worth" units; let regression learn points/drive
+                # Eckel term
                 net_eckel = (m_wk["home_off_eckel"] - m_wk["away_def_eckel_allowed"]) - (
                     m_wk["away_off_eckel"] - m_wk["home_def_eckel_allowed"]
                 )
@@ -338,8 +334,7 @@ def predict_week(
         B_HFA, B_EPA, B_ECKEL = 1.3, 1.0, 0.0
         SIGMA = 13.5
 
-    # ================== PREDICT THIS WEEK ==================
-    # Load current-season PBP once
+    # ---- PREDICT THIS WEEK ----
     pbp_curr = import_pbp_data([season])
     kneel = bool_series(pbp_curr, "qb_kneel")
     spike = bool_series(pbp_curr, "qb_spike")
@@ -366,25 +361,12 @@ def predict_week(
         .rename(columns={"defteam": "team"})
     )
     if off_rank.empty or def_rank.empty:
-        # No qualifying plays yet — return empty frame with expected columns
         return pd.DataFrame(
             columns=[
-                "game_id",
-                "week",
-                "away_team",
-                "home_team",
-                "home_off_epa",
-                "away_def_epa_allowed",
-                "home_off_vs_away_def",
-                "away_off_epa",
-                "home_def_epa_allowed",
-                "away_off_vs_home_def",
-                "net_epa_per_play",
-                "K_pair",
-                "pred_margin",
-                "home_win_prob",
-                "pick",
-                "pick_prob",
+                "game_id","week","away_team","home_team",
+                "home_off_epa","away_def_epa_allowed","home_off_vs_away_def",
+                "away_off_epa","home_def_epa_allowed","away_off_vs_home_def",
+                "net_epa_per_play","K_pair","pred_margin","home_win_prob","pick","pick_prob",
             ]
         )
 
@@ -437,24 +419,16 @@ def predict_week(
 
         # Eckel
         cols = [
-            "game_id",
-            "drive",
-            "posteam",
-            "defteam",
-            "first_down",
-            "yardline_100",
-            "touchdown",
-            "rush_touchdown",
-            "pass_touchdown",
-            "play_type",
+            "game_id","drive","posteam","defteam","first_down","yardline_100",
+            "touchdown","rush_touchdown","pass_touchdown","play_type",
         ]
         rd = recent[cols].copy()
         rd = rd[rd["play_type"].isin(["pass", "run"])]
-        rd["is_TD"] = rd[["touchdown", "rush_touchdown", "pass_touchdown"]].any(axis=1).fillna(False)
+        rd["is_TD"] = rd[["touchdown","rush_touchdown","pass_touchdown"]].any(axis=1).fillna(False)
         rd["fd_inside40"] = (rd["first_down"].fillna(0).astype(int).eq(1) & (rd["yardline_100"] <= 40))
         drive_flags = (
-            rd.groupby(["game_id", "drive", "posteam", "defteam"], observed=True)
-            .agg(td=("is_TD", "any"), fd40=("fd_inside40", "any"))
+            rd.groupby(["game_id","drive","posteam","defteam"], observed=True)
+            .agg(td=("is_TD","any"), fd40=("fd_inside40","any"))
             .reset_index()
         )
         drive_flags["quality_off"] = drive_flags["td"] | drive_flags["fd40"]
@@ -462,15 +436,13 @@ def predict_week(
             drive_flags.groupby("posteam", observed=True)["quality_off"]
             .agg(drives="size", quality="sum")
             .assign(off_eckel_rate=lambda x: x["quality"] / x["drives"])
-            .reset_index()
-            .rename(columns={"posteam": "team"})
+            .reset_index().rename(columns={"posteam":"team"})
         )
         def_eckel = (
             drive_flags.groupby("defteam", observed=True)["quality_off"]
             .agg(drives_faced="size", quality_allowed="sum")
             .assign(def_eckel_allowed=lambda x: x["quality_allowed"] / x["drives_faced"])
-            .reset_index()
-            .rename(columns={"defteam": "team"})
+            .reset_index().rename(columns={"defteam":"team"})
         )
     else:
         off_pg = pd.DataFrame({"team": off_rank["team"], "off_plays_pg_raw": 60.0})
@@ -487,19 +459,14 @@ def predict_week(
 
     # DRIVES_PG for current predictions
     if week > 1 and "recent" in locals() and not recent.empty:
-        drives_off = recent.groupby(["game_id", "posteam"])["drive"].nunique().reset_index(name="drives")
+        drives_off = recent.groupby(["game_id","posteam"])["drive"].nunique().reset_index(name="drives")
         DRIVES_PG = float(drives_off["drives"].mean()) if len(drives_off) else 11.5
     else:
         DRIVES_PG = 11.5
     DRIVES_PG = float(np.clip(DRIVES_PG, 9.0, 13.5))
 
-    # Learned model:
     # margin = B_HFA * H + B_EPA * (K_pair * net_epa_per_play) + B_ECKEL * (DRIVES_PG * net_eckel_rate)
-    H_game = (
-        ~m.get("neutral_site", pd.Series(False, index=m.index))
-        .fillna(False)
-        .astype(int)
-    )
+    H_game = (~m.get("neutral_site", pd.Series(False, index=m.index)).fillna(False)).astype(int)
     net_eckel_now = (m["home_off_eckel"] - m["away_def_eckel_allowed"]) - (
         m["away_off_eckel"] - m["home_def_eckel_allowed"]
     )
@@ -520,34 +487,22 @@ def predict_week(
     view = (
         m[
             [
-                "game_id",
-                "week",
-                "away_team",
-                "home_team",
-                "home_off_epa",
-                "away_def_epa_allowed",
-                "home_off_vs_away_def",
-                "away_off_epa",
-                "home_def_epa_allowed",
-                "away_off_vs_home_def",
-                "net_epa_per_play",
-                "K_pair",
-                "pred_margin",
-                "home_win_prob",
-                "pick",
-                "pick_prob",
+                "game_id","week","away_team","home_team",
+                "home_off_epa","away_def_epa_allowed","home_off_vs_away_def",
+                "away_off_epa","home_def_epa_allowed","away_off_vs_home_def",
+                "net_epa_per_play","K_pair","pred_margin","home_win_prob","pick","pick_prob",
             ]
         ]
-        .sort_values(by=["pick_prob", "pred_margin"], ascending=[False, False])
+        .sort_values(by=["pick_prob","pred_margin"], ascending=[False, False])
         .reset_index(drop=True)
     )
-
     return view
-    
-#if __name__ == "__main__":
-#    # Quick test
-#        df = predict_week(2025, 8)
-#        pd.set_option("display.max_rows", None)
-#        pd.set_option("display.width", 180)
-#        pd.set_option("display.float_format", "{:.3f}".format)
-#        print(df.to_string(index=False))   
+
+
+# ---------- run standalone ----------
+if __name__ == "__main__":
+    df = predict_week(2025, 8)
+    pd.set_option("display.max_rows", None)
+    pd.set_option("display.width", 180)
+    pd.set_option("display.float_format", "{:.3f}".format)
+    print(df.to_string(index=False))
