@@ -22,7 +22,6 @@ const fmtNum = (x: number | null | undefined, d = 2) =>
 
 export default function HistoryPage() {
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-
   const [season, setSeason] = useState<number>(2025);
   const [week, setWeek] = useState<number>(8);
   const [limit, setLimit] = useState<number>(200);
@@ -45,6 +44,16 @@ export default function HistoryPage() {
       setErr(e?.message ?? "Failed to load");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onSnapshot = async () => {
+    try {
+      const res = await fetch(`${apiBase}/predict/snapshot?season=${season}&week=${week}`, { method: "POST" });
+      if (!res.ok) throw new Error(`Snapshot failed (HTTP ${res.status})`);
+      await fetchHistory();
+    } catch (e: any) {
+      alert(e?.message ?? "Snapshot failed");
     }
   };
 
@@ -73,73 +82,47 @@ export default function HistoryPage() {
     }
   };
 
-  const onSnapshot = async () => {
-    try {
-      const url = `${apiBase}/predict/snapshot?season=${season}&week=${week}`;
-      const res = await fetch(url, { method: "POST" });
-      if (!res.ok) throw new Error(`Snapshot failed (HTTP ${res.status})`);
-      await fetchHistory();
-      alert("Snapshot saved & history refreshed.");
-    } catch (e: any) {
-      alert(e?.message ?? "Snapshot failed");
-    }
-  };
-
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
-        <header className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Prediction History</h1>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              className="border rounded px-3 py-2 w-28"
-              value={season}
-              onChange={(e) => setSeason(parseInt(e.target.value || "0"))}
-              placeholder="Season"
-            />
-            <input
-              type="number"
-              className="border rounded px-3 py-2 w-20"
-              value={week}
-              onChange={(e) => setWeek(parseInt(e.target.value || "0"))}
-              placeholder="Week"
-            />
-            <input
-              type="number"
-              className="border rounded px-3 py-2 w-24"
-              value={limit}
-              onChange={(e) => setLimit(parseInt(e.target.value || "0"))}
-              placeholder="Limit"
-              title="Max rows to return"
-            />
-            <button
-              onClick={fetchHistory}
-              className="px-4 py-2 rounded bg-black text-white disabled:opacity-60"
-              disabled={loading}
-            >
+    <div className="space-y-6">
+      {/* Controls */}
+      <div className="card">
+        <div className="card-header">
+          <h1 className="text-lg font-semibold">Prediction History</h1>
+          <div className="flex items-center gap-2">
+            <button onClick={onSnapshot} className="btn btn-secondary">Save snapshot</button>
+            <button onClick={fetchHistory} className="btn btn-primary" disabled={loading}>
               {loading ? "Loading…" : "Load"}
             </button>
-            <button
-              onClick={onSnapshot}
-              className="px-3 py-2 rounded border bg-white"
-              title="Save a new snapshot for this season/week"
-            >
-              Save snapshot
-            </button>
           </div>
-        </header>
-
-        {err && (
-          <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded">
-            {err}
+        </div>
+        <div className="card-body flex flex-wrap gap-3">
+          <label className="text-sm">
+            <div className="text-gray-500 mb-1">Season</div>
+            <input type="number" className="input w-32" value={season} onChange={(e) => setSeason(parseInt(e.target.value || "0"))} />
+          </label>
+          <label className="text-sm">
+            <div className="text-gray-500 mb-1">Week</div>
+            <input type="number" className="input w-24" value={week} onChange={(e) => setWeek(parseInt(e.target.value || "0"))} />
+          </label>
+          <label className="text-sm">
+            <div className="text-gray-500 mb-1">Limit</div>
+            <input type="number" className="input w-24" value={limit} onChange={(e) => setLimit(parseInt(e.target.value || "0"))} />
+          </label>
+          <div className="flex-1" />
+          <div className="hidden sm:flex items-center gap-3">
+            <div className="text-xs text-gray-500">
+              API: <code className="text-gray-700">{apiBase}/history?season={season}&week={week}&limit={limit}</code>
+            </div>
           </div>
-        )}
+        </div>
+      </div>
 
-        <div className="overflow-auto bg-white rounded-lg shadow">
-          <table className="min-w-full">
-            <thead className="bg-gray-100 text-sm">
-              <tr>
+      {/* Table */}
+      <div className="card overflow-hidden">
+        <div className="card-body p-0">
+          <table className="table">
+            <thead className="thead">
+              <tr className="tr">
                 <Th label="Created At" onClick={() => toggleSort("created_at")} active={sortKey === "created_at"} dir={sortDir} />
                 <Th label="Season" onClick={() => toggleSort("season")} active={sortKey === "season"} dir={sortDir} />
                 <Th label="Week" onClick={() => toggleSort("week")} active={sortKey === "week"} dir={sortDir} />
@@ -150,40 +133,33 @@ export default function HistoryPage() {
                 <Th label="Pick (Prob)" onClick={() => toggleSort("pick_prob")} active={sortKey === "pick_prob"} dir={sortDir} />
               </tr>
             </thead>
-            <tbody className="text-sm">
-              {sorted.map((r) => (
-                <tr key={r.id + "-" + r.game_id} className="border-t">
-                  <td className="px-3 py-2 whitespace-nowrap">{new Date(r.created_at).toLocaleString()}</td>
-                  <td className="px-3 py-2">{r.season}</td>
-                  <td className="px-3 py-2">{r.week}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-gray-600">{r.game_id}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
+            <tbody>
+              {loading && <RowMessage text="Loading…" />}
+              {!loading && err && <RowMessage text={`Error: ${err}`} isError />}
+              {!loading && !err && sorted.length === 0 && <RowMessage text="No history found." />}
+
+              {!loading && !err && sorted.map((r) => (
+                <tr key={r.id + "-" + r.game_id} className="tr">
+                  <td className="td whitespace-nowrap">{new Date(r.created_at).toLocaleString()}</td>
+                  <td className="td">{r.season}</td>
+                  <td className="td">{r.week}</td>
+                  <td className="td font-mono text-xs text-gray-600">{r.game_id}</td>
+                  <td className="td whitespace-nowrap">
                     <span className="font-medium">{r.away_team}</span> @ <span className="font-medium">{r.home_team}</span>
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(r.pred_margin)}</td>
-                  <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtPct(r.home_win_prob)}</td>
-                  <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">
+                  <td className="td text-right num">{fmtNum(r.pred_margin)}</td>
+                  <td className="td text-right num">{fmtPct(r.home_win_prob)}</td>
+                  <td className="td text-right num">
                     <span className="font-semibold">{r.pick}</span>{" "}
                     <span className="text-gray-600">({fmtPct(r.pick_prob)})</span>
                   </td>
                 </tr>
               ))}
-
-              {!loading && sorted.length === 0 && (
-                <tr><td className="px-3 py-6 text-center text-gray-500" colSpan={8}>No history found.</td></tr>
-              )}
-              {loading && (
-                <tr><td className="px-3 py-6 text-center text-gray-500" colSpan={8}>Loading…</td></tr>
-              )}
             </tbody>
           </table>
         </div>
-
-        <p className="text-xs text-gray-500">
-          API: <code>{apiBase}/history?season={season}&week={week}&limit={limit}</code>
-        </p>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -199,15 +175,23 @@ function Th({
   dir?: "asc" | "desc";
 }) {
   return (
-    <th
-      className={`px-3 py-2 text-left font-medium ${onClick ? "cursor-pointer select-none" : ""}`}
-      onClick={onClick}
-      title={onClick ? "Sort" : undefined}
-    >
+    <th className="th select-none" onClick={onClick} title={onClick ? "Sort" : undefined}>
       <div className="inline-flex items-center gap-1">
         {label}
         {active && <span className="text-gray-400">{dir === "asc" ? "▲" : "▼"}</span>}
       </div>
     </th>
+  );
+}
+
+function RowMessage({ text, isError = false }: { text: string; isError?: boolean }) {
+  return (
+    <tr>
+      <td className="td text-center py-8 text-sm" colSpan={8}>
+        <span className={`px-3 py-2 rounded ${isError ? "bg-red-50 text-red-700 border border-red-200" : "bg-gray-100 text-gray-700"}`}>
+          {text}
+        </span>
+      </td>
+    </tr>
   );
 }

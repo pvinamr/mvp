@@ -27,6 +27,7 @@ const fmtNum = (x: number | null | undefined, d = 2) =>
   x === null || x === undefined ? "—" : x.toFixed(d);
 
 export default function Home() {
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
   const [season, setSeason] = useState<number>(2025);
   const [week, setWeek] = useState<number>(8);
   const [rows, setRows] = useState<GameView[]>([]);
@@ -35,14 +36,11 @@ export default function Home() {
   const [sortKey, setSortKey] = useState<keyof GameView>("pick_prob");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-
   const fetchData = async () => {
     setLoading(true);
     setErr(null);
     try {
-      const url = `${apiBase}/predict?season=${season}&week=${week}`;
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch(`${apiBase}/predict?season=${season}&week=${week}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: GameView[] = await res.json();
       setRows(data);
@@ -65,10 +63,7 @@ export default function Home() {
       const bv = b[sortKey] ?? -Infinity;
       if (av < bv) return sortDir === "asc" ? -1 : 1;
       if (av > bv) return sortDir === "asc" ? 1 : -1;
-      // tie-breaker
-      const ap = a.pick_prob ?? 0;
-      const bp = b.pick_prob ?? 0;
-      return bp - ap;
+      return (b.pick_prob ?? 0) - (a.pick_prob ?? 0); // tie-breaker
     });
     return copy;
   }, [rows, sortKey, sortDir]);
@@ -82,52 +77,55 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
-        <header className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">NFL Model — Picks & Probabilities</h1>
-          <div className="flex gap-2 items-center">
-            <Link
-              href="/history"
-              className="px-4 py-2 rounded border border-gray-300 bg-white hover:bg-gray-100 text-sm"
-            >
-              View History
-            </Link>
-            <input
-              type="number"
-              className="border rounded px-3 py-2 w-28"
-              value={season}
-              onChange={(e) => setSeason(parseInt(e.target.value || "0"))}
-              placeholder="Season"
-            />
-            <input
-              type="number"
-              className="border rounded px-3 py-2 w-20"
-              value={week}
-              onChange={(e) => setWeek(parseInt(e.target.value || "0"))}
-              placeholder="Week"
-            />
-            <button
-              onClick={fetchData}
-              className="px-4 py-2 rounded bg-black text-white disabled:opacity-60"
-              disabled={loading}
-            >
+    <div className="space-y-6">
+      {/* Controls Card */}
+      <div className="card">
+        <div className="card-header">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold">Picks & Probabilities</h1>
+            <span className="badge">Live</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/history" className="btn btn-secondary">View History</Link>
+            <button onClick={fetchData} className="btn btn-primary" disabled={loading}>
               {loading ? "Loading…" : "Load"}
             </button>
           </div>
-        </header>
-
-
-        {err && (
-          <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded">
-            {err}
+        </div>
+        <div className="card-body flex flex-wrap gap-3">
+          <label className="text-sm">
+            <div className="text-gray-500 mb-1">Season</div>
+            <input
+              type="number"
+              className="input w-32"
+              value={season}
+              onChange={(e) => setSeason(parseInt(e.target.value || "0"))}
+            />
+          </label>
+          <label className="text-sm">
+            <div className="text-gray-500 mb-1">Week</div>
+            <input
+              type="number"
+              className="input w-24"
+              value={week}
+              onChange={(e) => setWeek(parseInt(e.target.value || "0"))}
+            />
+          </label>
+          <div className="flex-1" />
+          <div className="hidden sm:flex items-center gap-3">
+            <div className="text-xs text-gray-500">
+              API: <code className="text-gray-700">{apiBase}/predict?season={season}&week={week}</code>
+            </div>
           </div>
-        )}
+        </div>
+      </div>
 
-        <div className="overflow-auto bg-white rounded-lg shadow">
-          <table className="min-w-full">
-            <thead className="bg-gray-100 text-sm">
-              <tr>
+      {/* Table Card */}
+      <div className="card overflow-hidden">
+        <div className="card-body p-0">
+          <table className="table">
+            <thead className="thead">
+              <tr className="tr">
                 <Th label="Matchup" />
                 <Th label="Pred Margin" onClick={() => toggleSort("pred_margin")} active={sortKey === "pred_margin"} dir={sortDir} />
                 <Th label="Home Win %" onClick={() => toggleSort("home_win_prob")} active={sortKey === "home_win_prob"} dir={sortDir} />
@@ -136,43 +134,32 @@ export default function Home() {
                 <Th label="Pace K_pair" onClick={() => toggleSort("K_pair")} active={sortKey === "K_pair"} dir={sortDir} />
               </tr>
             </thead>
-            <tbody className="text-sm">
-              {sorted.map((g) => {
-                const isHomePick = g.pick === g.home_team;
-                const winPct = isHomePick ? g.home_win_prob : 1 - g.home_win_prob;
-                return (
-                  <tr key={String(g.game_id)} className="border-t">
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <div className="font-bold">{g.away_team} @ {g.home_team}</div>
-                      <div className="text-gray-600 text-xs">Week {g.week} • Game {g.game_id}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(g.pred_margin)}</td>
-                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtPct(g.home_win_prob)}</td>
-                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">
-                      <span className="font-bold">{g.pick}</span>{" "}
-                      <span className="text-gray-600">({fmtPct(g.pick_prob)})</span>
-                    </td>
-                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(g.net_epa_per_play, 3)}</td>
-                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(g.K_pair, 1)}</td>
-                  </tr>
-                );
-              })}
+            <tbody>
+              {loading && <RowMessage text="Loading…" />}
+              {!loading && err && <RowMessage text={`Error: ${err}`} isError />}
+              {!loading && !err && sorted.length === 0 && <RowMessage text="No games found." />}
 
-              {!loading && sorted.length === 0 && (
-                <tr><td className="px-3 py-6 text-center text-gray-500" colSpan={6}>No games found.</td></tr>
-              )}
-              {loading && (
-                <tr><td className="px-3 py-6 text-center text-gray-500" colSpan={6}>Loading…</td></tr>
-              )}
+              {!loading && !err && sorted.map((g) => (
+                <tr key={String(g.game_id)} className="tr">
+                  <td className="td whitespace-nowrap">
+                    <div className="font-medium">{g.away_team} @ {g.home_team}</div>
+                    <div className="text-gray-500 text-xs">Week {g.week} • Game {g.game_id}</div>
+                  </td>
+                  <td className="td text-right num">{fmtNum(g.pred_margin)}</td>
+                  <td className="td text-right num">{fmtPct(g.home_win_prob)}</td>
+                  <td className="td text-right num">
+                    <span className="font-semibold">{g.pick}</span>{" "}
+                    <span className="text-gray-600">({fmtPct(g.pick_prob)})</span>
+                  </td>
+                  <td className="td text-right num">{fmtNum(g.net_epa_per_play, 3)}</td>
+                  <td className="td text-right num">{fmtNum(g.K_pair, 1)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-
-        <p className="text-xs text-gray-500">
-          API: <code>{apiBase}/predict?season={season}&week={week}</code>
-        </p>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -188,15 +175,23 @@ function Th({
   dir?: "asc" | "desc";
 }) {
   return (
-    <th
-      className={`px-3 py-2 text-left font-medium ${onClick ? "cursor-pointer select-none" : ""}`}
-      onClick={onClick}
-      title={onClick ? "Sort" : undefined}
-    >
+    <th className="th select-none" onClick={onClick} title={onClick ? "Sort" : undefined}>
       <div className="inline-flex items-center gap-1">
         {label}
         {active && <span className="text-gray-400">{dir === "asc" ? "▲" : "▼"}</span>}
       </div>
     </th>
+  );
+}
+
+function RowMessage({ text, isError = false }: { text: string; isError?: boolean }) {
+  return (
+    <tr>
+      <td className="td text-center py-8 text-sm" colSpan={6}>
+        <span className={`px-3 py-2 rounded ${isError ? "bg-red-50 text-red-700 border border-red-200" : "bg-gray-100 text-gray-700"}`}>
+          {text}
+        </span>
+      </td>
+    </tr>
   );
 }
