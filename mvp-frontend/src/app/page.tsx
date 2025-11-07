@@ -135,17 +135,17 @@ export default function Home() {
                 return (
                   <tr key={String(g.game_id)} className="border-t">
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <div className="font-medium">{g.away_team} @ {g.home_team}</div>
-                      <div className="text-gray-500 text-xs">Week {g.week} • Game {g.game_id}</div>
+                      <div className="font-bold">{g.away_team} @ {g.home_team}</div>
+                      <div className="text-gray-600 text-xs">Week {g.week} • Game {g.game_id}</div>
                     </td>
-                    <td className="px-3 py-2 text-right">{fmtNum(g.pred_margin)}</td>
-                    <td className="px-3 py-2 text-right">{fmtPct(g.home_win_prob)}</td>
-                    <td className="px-3 py-2 text-right">
-                      <span className="font-medium">{g.pick}</span>{" "}
-                      <span className="text-gray-500">({fmtPct(g.pick_prob)})</span>
+                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(g.pred_margin)}</td>
+                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtPct(g.home_win_prob)}</td>
+                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">
+                      <span className="font-bold">{g.pick}</span>{" "}
+                      <span className="text-gray-600">({fmtPct(g.pick_prob)})</span>
                     </td>
-                    <td className="px-3 py-2 text-right">{fmtNum(g.net_epa_per_play, 3)}</td>
-                    <td className="px-3 py-2 text-right">{fmtNum(g.K_pair, 1)}</td>
+                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(g.net_epa_per_play, 3)}</td>
+                    <td className="px-3 py-2 text-right font-semibold font-mono text-gray-900">{fmtNum(g.K_pair, 1)}</td>
                   </tr>
                 );
               })}
