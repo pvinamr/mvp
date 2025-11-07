@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 type GameView = {
   game_id: string | number;
@@ -85,7 +86,13 @@ export default function Home() {
       <div className="max-w-6xl mx-auto p-6 space-y-6">
         <header className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">NFL Model — Picks & Probabilities</h1>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <Link
+              href="/history"
+              className="px-4 py-2 rounded border border-gray-300 bg-white hover:bg-gray-100 text-sm"
+            >
+              View History
+            </Link>
             <input
               type="number"
               className="border rounded px-3 py-2 w-28"
@@ -109,6 +116,7 @@ export default function Home() {
             </button>
           </div>
         </header>
+
 
         {err && (
           <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded">
