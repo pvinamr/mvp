@@ -3,24 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently --success=all -n API,WEB,OPEN -c magenta,cyan,gray \"cd .. && .venv\\Scripts\\python.exe -m uvicorn api.main:app --reload --port 8000\" \"next dev -p 3000\" \"wait-on http://localhost:3000 && open-cli http://localhost:3000\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "next": "16.0.1",
     "react": "19.2.0",
-    "react-dom": "19.2.0",
-    "next": "16.0.1"
+    "react-dom": "19.2.0"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
-    "eslint-config-next": "16.0.1"
+    "eslint-config-next": "16.0.1",
+    "open-cli": "^8.0.0",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wait-on": "^9.0.3"
   }
 }

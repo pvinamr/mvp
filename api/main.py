@@ -13,7 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 # local imports
 from model.predict_week import predict_week
 from .settings import settings
-from .db import init_db, save_predictions, list_predictions
+from .db import init_db, save_predictions, list_predictions, has_week
 
 # ---------------- App & CORS ----------------
 app = FastAPI(title="NFL Model API", version="0.2.0")
@@ -68,17 +68,29 @@ def health():
 async def predict(
     season: int = Query(settings.default_season, ge=1999),
     week:   int = Query(settings.default_week,   ge=1, le=22),
+    force_snapshot: bool = Query(False, description="If true, save to DB even on cache hit"),
 ):
     key = (season, week)
     now = time.time()
 
-    # serve from cache if fresh
+    # Serve from cache if fresh
     hit = _cache.get(key)
     if hit and (now - hit[0] < settings.cache_ttl_seconds):
-        logger.info(f"/predict cache=HIT key={key}")
-        return hit[1]
+        payload = hit[1]
+        # NEW: save to DB if forced OR week not yet in DB
+        if force_snapshot or not has_week(season, week):
+            try:
+                n = save_predictions(season, week, payload)
+                logger.info(f"/predict cache=HIT -> snapshot rows={n} season={season} week={week}")
+            except Exception:
+                logger.exception("auto snapshot on HIT failed (non-fatal)")
+        else:
+            logger.info(f"/predict cache=HIT key={key} (already in DB)")
+        return payload
 
     logger.info(f"/predict cache=MISS key={key}")
+
+    # Compute fresh
     try:
         df = await _run_predict(season, week)
     except Exception:
@@ -87,6 +99,14 @@ async def predict(
 
     payload = df.to_dict(orient="records")
     _cache[key] = (now, payload)
+
+    # Save on miss (same as before)
+    try:
+        n = save_predictions(season, week, payload)
+        logger.info(f"/predict cache=MISS -> snapshot rows={n} season={season} week={week}")
+    except Exception:
+        logger.exception("auto snapshot on MISS failed (non-fatal)")
+
     return payload
 
 @app.post("/predict/snapshot")
