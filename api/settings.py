@@ -1,12 +1,17 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+# api/settings.py
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
-    # API
-    cache_ttl_seconds: int = 900   # 15 min default
+    # API defaults
     default_season: int = 2025
-    default_week: int = 10
-    cors_origins: str = "*"        # comma-separated list in prod
+    default_week: int = 8
+    cache_ttl_seconds: int = 900
+    cors_origins: str = "http://localhost:3000"
+    odds_api_key: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="API_", case_sensitive=False)
+    class Config:
+        env_file = ".env"   # will look for api/.env
+
 
 settings = Settings()

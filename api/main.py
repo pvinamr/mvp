@@ -14,6 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from model.predict_week import predict_week
 from .settings import settings
 from .db import init_db, save_predictions, list_predictions, has_week
+from .odds import fetch_draftkings_spreads
 
 # ---------------- App & CORS ----------------
 app = FastAPI(title="NFL Model API", version="0.2.0")
@@ -136,3 +137,7 @@ def history(
     except Exception:
         logger.exception("history failed")
         raise HTTPException(status_code=500, detail="History fetch failed")
+    
+@app.get("/odds/draftkings")
+async def draftkings_odds():
+    return await fetch_draftkings_spreads()
