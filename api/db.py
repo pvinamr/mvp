@@ -9,36 +9,59 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from .settings import settings
+
 # ---------- DB URL (absolute path for SQLite) ----------
 DEFAULT_SQLITE_PATH = os.path.abspath(os.getenv("SQLITE_FILE", "nfl.db"))
-DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH}")
+
+DB_URL = (
+    settings.database_url
+    or os.getenv("DATABASE_URL")
+    or f"sqlite:///{DEFAULT_SQLITE_PATH}"
+)
 
 engine = create_engine(DB_URL, future=True)
+DIALECT = engine.url.get_backend_name()
 
 # ---------- Schema statements (execute separately) ----------
-DDL_TABLE = """
-CREATE TABLE IF NOT EXISTS model_predictions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  season INTEGER NOT NULL,
-  week   INTEGER NOT NULL,
-  game_id TEXT NOT NULL,
-  payload TEXT NOT NULL,              -- JSON as text
-  created_at TIMESTAMP NOT NULL
-);
-"""
+if DIALECT == "sqlite":
+    DDL_TABLE = """
+    CREATE TABLE IF NOT EXISTS model_predictions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      season INTEGER NOT NULL,
+      week   INTEGER NOT NULL,
+      game_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL
+    );
+    """
+    # SQLite-only dedupe using rowid
+    DEDUP_SQL = """
+    DELETE FROM model_predictions
+    WHERE rowid NOT IN (
+      SELECT MAX(rowid)
+      FROM model_predictions
+      GROUP BY season, week, game_id
+    );
+    """
+else:
+    # Postgres / others (Supabase)
+    DDL_TABLE = """
+    CREATE TABLE IF NOT EXISTS model_predictions (
+      id BIGSERIAL PRIMARY KEY,
+      season INTEGER NOT NULL,
+      week   INTEGER NOT NULL,
+      game_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+    """
+    # We don't need a rowid-style dedupe in Postgres for now
+    DEDUP_SQL = None
 
 DDL_INDEX = """
 CREATE UNIQUE INDEX IF NOT EXISTS ux_model_predictions_unique
   ON model_predictions (season, week, game_id);
-"""
-
-DEDUP_SQL = """
-DELETE FROM model_predictions
-WHERE rowid NOT IN (
-  SELECT MAX(rowid)
-  FROM model_predictions
-  GROUP BY season, week, game_id
-);
 """
 
 # ---------- Lifecycle ----------
@@ -46,51 +69,74 @@ def init_db() -> str:
     """
     Initialize DB schema.
     - Creates table.
-    - Creates unique index (dedupes first if needed).
+    - Creates unique index (in SQLite we dedupe first if needed).
     Returns the DB URL for logging.
     """
     with engine.begin() as conn:
-        # Important: exec each statement separately for SQLite
         conn.exec_driver_sql(DDL_TABLE)
         try:
             conn.exec_driver_sql(DDL_INDEX)
         except SQLAlchemyError:
-            # Likely failed due to existing duplicates; dedupe then retry
-            conn.exec_driver_sql(DEDUP_SQL)
-            conn.exec_driver_sql(DDL_INDEX)
+            # This path is only for SQLite duplicates; skip for Postgres
+            if DIALECT == "sqlite" and DEDUP_SQL is not None:
+                conn.exec_driver_sql(DEDUP_SQL)
+                conn.exec_driver_sql(DDL_INDEX)
+            else:
+                raise
     return DB_URL
 
 # ---------- Writes ----------
 def save_predictions(season: int, week: int, rows: List[Dict[str, Any]]) -> int:
     """
     Upsert each game's payload for (season, week).
-    On conflict, overwrite with the latest payload & timestamp.
-    Returns the number of rows processed.
+    Also stores pred_margin and home_win_prob in dedicated columns
+    for easier querying/inspection in the DB.
     """
     if not rows:
         return 0
 
     now = dt.datetime.utcnow()
-    params = [
-        {
-            "season": season,
-            "week": week,
-            "game_id": str(r.get("game_id")),
-            "payload": json.dumps(r),
-            "ts": now,
-        }
-        for r in rows
-    ]
+    params = []
+    for r in rows:
+        params.append(
+            {
+                "season": season,
+                "week": week,
+                "game_id": str(r.get("game_id")),
+                "payload": json.dumps(r),
+                "ts": now,
+                "pred_margin": float(r.get("pred_margin")) if r.get("pred_margin") is not None else None,
+                "home_win_prob": float(r.get("home_win_prob")) if r.get("home_win_prob") is not None else None,
+            }
+        )
 
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-                INSERT INTO model_predictions (season, week, game_id, payload, created_at)
-                VALUES (:season, :week, :game_id, :payload, :ts)
+                INSERT INTO model_predictions (
+                    season,
+                    week,
+                    game_id,
+                    payload,
+                    created_at,
+                    pred_margin,
+                    home_win_prob
+                )
+                VALUES (
+                    :season,
+                    :week,
+                    :game_id,
+                    :payload,
+                    :ts,
+                    :pred_margin,
+                    :home_win_prob
+                )
                 ON CONFLICT(season, week, game_id) DO UPDATE SET
-                  payload    = excluded.payload,
-                  created_at = excluded.created_at
+                  payload       = excluded.payload,
+                  created_at    = excluded.created_at,
+                  pred_margin   = excluded.pred_margin,
+                  home_win_prob = excluded.home_win_prob
                 """
             ),
             params,
@@ -148,9 +194,13 @@ def count_predictions() -> int:
     return int(n)
 
 def dedupe_keep_newest() -> int:
+    if DIALECT != "sqlite" or DEDUP_SQL is None:
+        return 0
     with engine.begin() as conn:
         res = conn.execute(text(DEDUP_SQL))
         return res.rowcount or 0
+    clear
+
 def has_week(season: int, week: int) -> bool:
     """Return True if there is at least one row for (season, week)."""
     with engine.begin() as conn:
