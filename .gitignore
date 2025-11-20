@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+
+# Node
+node_modules/
+
+# Local env
+.env
+api/.env
+
+# Local sqlite fallback
+nfl.db
