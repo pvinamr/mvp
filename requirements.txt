@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+
+pandas
+numpy
+nfl_data_py
+
+sqlalchemy
+psycopg2-binary
+
+httpx
+pydantic
+pydantic-settings
+python-dotenv
+typing-extensions
