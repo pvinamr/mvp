@@ -44,7 +44,10 @@ const fmtPct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const fmtNum = (x: number | null | undefined, d = 2) =>
   x === null || x === undefined ? "—" : x.toFixed(d);
 
+
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+console.log("API_BASE from env:", apiBase);
 
 // --- helpers to merge odds with model ---
 

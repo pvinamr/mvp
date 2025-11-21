@@ -3,22 +3,20 @@ from __future__ import annotations
 
 import time
 import logging
-from typing import Dict, Tuple, List
+from typing import Dict, List, Tuple, Any
 
-import pandas as pd
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.concurrency import run_in_threadpool
 
-# local imports
-from model.predict_week import predict_week
 from .settings import settings
-from .db import init_db, save_predictions, list_predictions, has_week
+from .db import init_db, list_predictions, save_predictions
 from .odds import fetch_draftkings_spreads
 
-# ---------------- App & CORS ----------------
-app = FastAPI(title="NFL Model API", version="0.2.0")
+logger = logging.getLogger("uvicorn.error")
 
+app = FastAPI(title="NFL Model API", version="0.3.0")
+
+# ---- CORS ----
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
@@ -26,118 +24,91 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- Logging ----------------
-logger = logging.getLogger("uvicorn.error")
+# ---- Simple cache: (season, week) -> (timestamp, rows) ----
+_cache: Dict[Tuple[int, int], Tuple[float, List[Dict[str, Any]]]] = {}
 
-@app.middleware("http")
-async def timing_middleware(request, call_next):
-    t0 = time.perf_counter()
-    try:
-        response = await call_next(request)
-        return response
-    finally:
-        dt_ms = (time.perf_counter() - t0) * 1000.0
-        logger.info(f"{request.method} {request.url.path} -> {getattr(response, 'status_code', 0)} [{dt_ms:.1f} ms]")
 
-# ---------------- Startup ----------------
 @app.on_event("startup")
-def _startup():
-    # initialize DB (creates tables if needed)
-    init_db()
-    logger.info("DB initialized. Service is ready.")
+def _startup() -> None:
+    db_url = init_db()
+    logger.info("DB initialized at %s", db_url)
 
-# ---------------- Cache ----------------
-# key: (season, week) -> (timestamp, payload_json_list)
-_cache: Dict[Tuple[int, int], Tuple[float, List[dict]]] = {}
 
-# ---------------- Helper ----------------
-async def _run_predict(season: int, week: int) -> pd.DataFrame:
-    """Run the synchronous model in a thread so the server stays responsive."""
-    return await run_in_threadpool(predict_week, season, week)
-
-# ---------------- Endpoints ----------------
 @app.get("/health")
-def health():
-    return {
-        "ok": True,
-        "cache_size": len(_cache),
-        "cache_ttl": settings.cache_ttl_seconds,
-        "defaults": {"season": settings.default_season, "week": settings.default_week},
-    }
+def health() -> dict:
+    return {"status": "ok"}
+
 
 @app.get("/predict")
-async def predict(
+async def get_predictions(
     season: int = Query(settings.default_season, ge=1999),
-    week:   int = Query(settings.default_week,   ge=1, le=22),
-    force_snapshot: bool = Query(False, description="If true, save to DB even on cache hit"),
+    week: int = Query(settings.default_week, ge=1, le=22),
 ):
+    """
+    Return predictions for (season, week) *from the database only*.
+
+    These rows must have been uploaded beforehand via POST /predict/snapshot
+    (e.g. from your local machine using the heavy model).
+    """
     key = (season, week)
     now = time.time()
 
-    # Serve from cache if fresh
+    # cache check
     hit = _cache.get(key)
-    if hit and (now - hit[0] < settings.cache_ttl_seconds):
-        payload = hit[1]
-        # NEW: save to DB if forced OR week not yet in DB
-        if force_snapshot or not has_week(season, week):
-            try:
-                n = save_predictions(season, week, payload)
-                logger.info(f"/predict cache=HIT -> snapshot rows={n} season={season} week={week}")
-            except Exception:
-                logger.exception("auto snapshot on HIT failed (non-fatal)")
-        else:
-            logger.info(f"/predict cache=HIT key={key} (already in DB)")
-        return payload
+    if hit and now - hit[0] < settings.cache_ttl_seconds:
+        logger.info("/predict cache=HIT key=%s rows=%d", key, len(hit[1]))
+        return hit[1]
 
-    logger.info(f"/predict cache=MISS key={key}")
+    # load from DB
+    rows = list_predictions(season=season, week=week, limit=256)
+    if not rows:
+        logger.info("/predict cache=MISS key=%s but no rows in DB", key)
+        raise HTTPException(
+            status_code=404,
+            detail="No predictions stored for that season/week yet.",
+        )
 
-    # Compute fresh
-    try:
-        df = await _run_predict(season, week)
-    except Exception:
-        logger.exception("predict failed")
-        raise HTTPException(status_code=500, detail="Prediction failed")
+    _cache[key] = (now, rows)
+    logger.info("/predict cache=MISS key=%s rows=%d", key, len(rows))
+    return rows
 
-    payload = df.to_dict(orient="records")
-    _cache[key] = (now, payload)
-
-    # Save on miss (same as before)
-    try:
-        n = save_predictions(season, week, payload)
-        logger.info(f"/predict cache=MISS -> snapshot rows={n} season={season} week={week}")
-    except Exception:
-        logger.exception("auto snapshot on MISS failed (non-fatal)")
-
-    return payload
 
 @app.post("/predict/snapshot")
-async def snapshot(
-    season: int = Query(settings.default_season, ge=1999),
-    week:   int = Query(settings.default_week,   ge=1, le=22),
+async def save_snapshot(
+    season: int = Query(..., ge=1999),
+    week: int = Query(..., ge=1, le=22),
+    games: List[Dict[str, Any]] = Body(..., description="List of per-game prediction rows"),
 ):
-    """Compute current predictions and persist them to the DB."""
-    try:
-        df = await _run_predict(season, week)
-        rows = df.to_dict(orient="records")
-        n = save_predictions(season, week, rows)
-        return {"ok": True, "saved": n, "season": season, "week": week}
-    except Exception:
-        logger.exception("snapshot failed")
-        raise HTTPException(status_code=500, detail="Snapshot failed")
+    """
+    Upload a full week's predictions (from your local model) and store them in the DB.
+    This is called from your local script, NOT from the frontend.
+    """
+    if not games:
+        raise HTTPException(status_code=400, detail="Empty payload")
+
+    n = save_predictions(season, week, games)
+    _cache.pop((season, week), None)  # invalidate cache
+    logger.info("/predict/snapshot saved rows=%d season=%d week=%d", n, season, week)
+    return {"saved": n, "season": season, "week": week}
+
 
 @app.get("/history")
-def history(
-    season: int | None = Query(None, ge=1999),
-    week:   int | None = Query(None, ge=1, le=22),
-    limit:  int = Query(100, ge=1, le=1000),
+async def history(
+    season: int | None = Query(None),
+    week: int | None = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
 ):
-    """Return saved snapshots (flattened payloads)."""
-    try:
-        return list_predictions(season, week, limit)
-    except Exception:
-        logger.exception("history failed")
-        raise HTTPException(status_code=500, detail="History fetch failed")
-    
+    """
+    Return saved predictions from the DB (most recent first).
+    Used by your History page.
+    """
+    rows = list_predictions(season=season, week=week, limit=limit)
+    return rows
+
+
 @app.get("/odds/draftkings")
 async def draftkings_odds():
+    """
+    Proxy endpoint to fetch DraftKings spreads via odds API.
+    """
     return await fetch_draftkings_spreads()
