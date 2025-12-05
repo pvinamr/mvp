@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # API defaults
     default_season: int = 2025
-    default_week: int = 12
+    default_week: int = 14
     cache_ttl_seconds: int = 900
 
     # CORS
