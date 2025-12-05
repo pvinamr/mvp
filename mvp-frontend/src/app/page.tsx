@@ -146,7 +146,7 @@ function computeEdge(predMargin: number, homeSpread: number | null): number | nu
 
 export default function Home() {
   const [season, setSeason] = useState<number>(2025);
-  const [week, setWeek] = useState<number>(8);
+  const [week, setWeek] = useState<number>(14);
   const [rows, setRows] = useState<GameView[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
