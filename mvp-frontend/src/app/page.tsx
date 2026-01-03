@@ -146,7 +146,7 @@ function computeEdge(predMargin: number, homeSpread: number | null): number | nu
 
 export default function Home() {
   const [season, setSeason] = useState<number>(2025);
-  const [week, setWeek] = useState<number>(14);
+  const [week, setWeek] = useState<number>(18);
   const [rows, setRows] = useState<GameView[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -265,7 +265,13 @@ export default function Home() {
               type="number"
               className="input w-24"
               value={week}
-              onChange={(e) => setWeek(parseInt(e.target.value || "0"))}
+              min={1}
+              max={18}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                const clamped = Math.min(18, Math.max(1, value));
+                setWeek(clamped);
+              }}
             />
           </label>
           <div className="flex-1" />
