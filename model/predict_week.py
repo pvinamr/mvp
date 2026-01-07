@@ -382,7 +382,7 @@ def predict_week(
     # Schedule this week
     sched = import_schedules([season])
     games = sched.loc[
-        (sched["season"] == season) & (sched["week"] == week) & (sched["game_type"] == "REG")
+        (sched["season"] == season) & (sched["week"] == week) & (sched["game_type"].isin(["REG", "WC", "DIV", "CON", "SB"]))
     ].copy()
 
     # PER-GAME PACE & Eckel from weeks < week

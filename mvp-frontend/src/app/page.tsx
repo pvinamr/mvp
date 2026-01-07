@@ -266,10 +266,10 @@ export default function Home() {
               className="input w-24"
               value={week}
               min={1}
-              max={18}
+              max={22}
               onChange={(e) => {
                 const value = Number(e.target.value);
-                const clamped = Math.min(18, Math.max(1, value));
+                const clamped = Math.min(22, Math.max(1, value));
                 setWeek(clamped);
               }}
             />
